@@ -4,3 +4,5 @@ data/creditcard.csv
 
 .ipynb_checkpoints/
 __pycache__/
+
+/notebook/__pycache__/
