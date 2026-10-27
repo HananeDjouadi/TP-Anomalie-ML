@@ -1,1 +1,6 @@
-creditcard.csv
+# Ignore the credit card dataset
+data/creditcard.csv
+
+
+.ipynb_checkpoints/
+__pycache__/
