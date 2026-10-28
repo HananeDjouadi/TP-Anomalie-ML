@@ -164,3 +164,82 @@ def plot_ranking_curves(y_true, scores, name="Methode"):
 
     plt.tight_layout()
     plt.show()
+
+
+from sklearn.model_selection import train_test_split
+
+
+def split_novelty_mouse(X, y, test_size_normal=0.3, random_state=42):
+    """
+    Réserve une partie des points normaux + TOUTES les anomalies pour le test.
+    L'apprentissage ne contient que des points normaux.
+    """
+    X = X.reset_index(drop=True)
+    y = np.asarray(y)
+
+    X_norm = X[y == 0]
+    X_anom = X[y == 1]
+    y_anom = y[y == 1]
+
+    X_norm_train, X_norm_test, _, _ = train_test_split(
+        X_norm, y[y == 0],
+        test_size=test_size_normal,
+        random_state=random_state
+    )
+
+    X_train = X_norm_train.reset_index(drop=True)
+    y_train = np.zeros(len(X_train), dtype=int)  # que des normaux
+
+    X_test = pd.concat([X_norm_test, X_anom], axis=0).reset_index(drop=True)
+    y_test = np.concatenate([
+        np.zeros(len(X_norm_test), dtype=int),
+        y_anom
+    ])
+
+    return X_train, y_train, X_test, y_test
+
+
+def fit_lof_novelty(X_train, X_test, n_neighbors=20, **kwargs):
+    """
+    LOF en détection de nouveautés :
+    - fit sur X_train (normaux)
+    - scores sur X_test (nouveaux points)
+    """
+    model = LocalOutlierFactor(
+        n_neighbors=n_neighbors,
+        novelty=True,
+        **kwargs
+    )
+    model.fit(X_train)
+
+    # score_samples : plus bas = plus anormal → on inverse
+    scores_test = -model.score_samples(X_test)
+    preds = model.predict(X_test)  # 1 normal, -1 nouveauté/anomalie
+    y_pred = (preds == -1).astype(int)
+
+    return model, scores_test, y_pred
+
+
+def plot_novelty(X_train, X_test, y_test, y_pred, title="LOF nouveautés"):
+    """Apprentissage (normaux) vs test (prédictions)."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    axes[0].scatter(X_train["x1"], X_train["x2"], s=20, alpha=0.7, label="Train (normaux)")
+    axes[0].scatter(X_test.loc[y_test == 0, "x1"], X_test.loc[y_test == 0, "x2"],
+                    s=25, marker="o", facecolors="none", edgecolors="green", label="Test normal")
+    axes[0].scatter(X_test.loc[y_test == 1, "x1"], X_test.loc[y_test == 1, "x2"],
+                    s=40, c="red", marker="x", label="Test anomalie (vrai)")
+    axes[0].set_title(f"{title} — train vs test (vraies étiquettes)")
+    axes[0].legend()
+    axes[0].axis("equal")
+
+    axes[1].scatter(X_test.loc[y_pred == 0, "x1"], X_test.loc[y_pred == 0, "x2"],
+                    s=25, alpha=0.7, label="Prédit normal")
+    axes[1].scatter(X_test.loc[y_pred == 1, "x1"], X_test.loc[y_pred == 1, "x2"],
+                    s=40, c="red", marker="x", label="Prédit nouveauté")
+    axes[1].set_title(f"{title} — prédictions sur le test")
+    axes[1].legend()
+    axes[1].axis("equal")
+
+    plt.tight_layout()
+    plt.show()
