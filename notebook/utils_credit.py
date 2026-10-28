@@ -168,3 +168,61 @@ def trouver_meilleur_seuil(y_true, scores, min_precision=0.80):
   metriques["Contrainte (>=80%)"] = statut
 
   return metriques
+
+
+def tracer_f1_balanced_acc(y_true, scores, seuil_retenu=None):
+  """Trace l'évolution du F1-score et de la Balanced Accuracy en fonction du seuil."""
+  seuils = np.linspace(0.01, 0.99, 150)
+  f1_list = []
+  bacc_list = []
+
+  for t in seuils:
+    y_pred = (scores >= t).astype(int)
+    f1_list.append(f1_score(y_true, y_pred, zero_division=0))
+    bacc_list.append(balanced_accuracy_score(y_true, y_pred))
+
+  plt.figure(figsize=(10, 5))
+  plt.plot(seuils, f1_list, label="F1-score", color="blue", linewidth=2)
+  plt.plot(
+      seuils,
+      bacc_list,
+      label="Balanced Accuracy",
+      color="forestgreen",
+      linewidth=2,
+  )
+
+  best_t_f1 = seuils[np.argmax(f1_list)]
+  best_t_bacc = seuils[np.argmax(bacc_list)]
+
+  plt.axvline(
+      best_t_f1,
+      color="blue",
+      linestyle=":",
+      alpha=0.7,
+      label=f"Max F1 ({best_t_f1:.2f})",
+  )
+  plt.axvline(
+      best_t_bacc,
+      color="forestgreen",
+      linestyle=":",
+      alpha=0.7,
+      label=f"Max Balanced Acc ({best_t_bacc:.2f})",
+  )
+
+  if seuil_retenu is not None:
+    plt.axvline(
+        seuil_retenu,
+        color="red",
+        linestyle="--",
+        linewidth=2,
+        label=f"Seuil retenu (Précision>=80%) : {seuil_retenu:.4f}",
+    )
+
+  plt.title("Évolution du F1-score et de la Balanced Accuracy selon le seuil")
+  plt.xlabel("Seuil de décision")
+  plt.ylabel("Score")
+  plt.legend()
+  plt.grid(True, alpha=0.3)
+  plt.tight_layout()
+  plt.show()
+
