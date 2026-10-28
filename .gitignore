@@ -1,6 +1,10 @@
 # Ignore the credit card dataset
 data/creditcard.csv
 
+# Sujet TP (gardé en local, pas versionné)
+Atelier Pratique*.pdf
 
 .ipynb_checkpoints/
 __pycache__/
+
+/notebook/__pycache__/
