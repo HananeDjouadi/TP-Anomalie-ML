@@ -12,9 +12,10 @@
 - Construction des labels **avant tout mélange** : les 10 derniers points = anomalies (classe 1). Les labels servent **uniquement à l’évaluation** pour les méthodes non supervisées.
 - Méthodes : **Isolation Forest** et **LOF** en détection d’outliers sur l’ensemble Mouse (`novelty=False` pour LOF).
 - Scores harmonisés : plus le score est élevé, plus le point est suspect (inversion des scores sklearn si besoin).
-- Deux règles de seuil comparées **sans tuner avec les labels** :
+- Trois règles de seuil comparées **sans tuner avec les labels** :
   - seuil **par défaut** de chaque modèle ;
-  - seuil **IQR** : `Q3 + 1.5 × IQR` (heuristique de Tukey, `k=1.5` fixé a priori).
+  - seuil **IQR** : `Q3 + 1.5 × IQR` (heuristique de Tukey, `k=1.5` fixé a priori) ;
+  - seuil par **clustering** : KMeans (`k=2`) sur les scores, cluster de score moyen le plus élevé = anomalies.
 - Évaluation binaire : matrice de confusion et **F1** (mesure principale après seuil).
 - Évaluation de classement : **AP** et **AUC-ROC** sur les scores continus.
 - Détection de **nouveautés** : train = normaux uniquement ; test = normaux réservés + toutes les anomalies ; LOF avec `novelty=True`, évaluation sur le test seulement.
@@ -32,11 +33,14 @@ Le protocole commun 60/20/20 (Credit Card / AI4I) n’a **pas** été appliqué 
 |---------|----------------|------------|-----|
 | Isolation Forest | Défaut | 125 | 0.15 |
 | Isolation Forest | IQR | 21 | 0.65 |
+| Isolation Forest | Clustering (KMeans k=2) | 115 | 0.16 |
 | LOF | Défaut | 10 | 1.00 |
 | LOF | IQR | 37 | 0.43 |
+| LOF | Clustering (KMeans k=2) | 8 | 0.89 |
 
 - IF avec seuil défaut est trop sensible (beaucoup de bords de clusters).
-- L’IQR améliore nettement IF, mais dégrade LOF ici.
+- L’IQR améliore nettement IF ; le clustering IF reste proche du défaut (peu utile ici).
+- L’IQR dégrade LOF ; le clustering LOF reste très bon (F1 ≈ 0.89).
 - Meilleur F1 outliers : **LOF + seuil défaut** (sans utilisation des labels à l’apprentissage).
 
 ### 2.2 Classement (AP / AUC-ROC)

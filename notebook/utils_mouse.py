@@ -93,6 +93,7 @@ def plot_detection(X, y_pred, scores, title):
 
 
 from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.cluster import KMeans
 
 
 def threshold_iqr(scores, k=1.5):
@@ -105,6 +106,24 @@ def threshold_iqr(scores, k=1.5):
     iqr = q3 - q1
     threshold = q3 + k * iqr
     y_pred = (scores > threshold).astype(int)
+    return threshold, y_pred
+
+
+def threshold_clustering(scores, random_state=42):
+    """
+    Seuil par clustering (KMeans, k=2) sur les scores — sans utiliser y.
+    Le cluster de score moyen le plus élevé = anomalies.
+    Le seuil reporté est la frontière entre les 2 centres.
+    """
+    scores = np.asarray(scores, dtype=float).ravel()
+    X_1d = scores.reshape(-1, 1)
+    km = KMeans(n_clusters=2, random_state=random_state, n_init=10)
+    labels = km.fit_predict(X_1d)
+    centers = km.cluster_centers_.ravel()
+    anom_cluster = int(np.argmax(centers))
+    y_pred = (labels == anom_cluster).astype(int)
+    # frontière approximative entre les deux centres
+    threshold = float(np.mean(centers))
     return threshold, y_pred
 
 
@@ -121,7 +140,7 @@ def evaluate_binary(y_true, y_pred, name=""):
 
 
 def compare_thresholds(X, y_true, scores, y_pred_default, method_name="Methode"):
-    """Compare seuil par défaut vs seuil IQR."""
+    """Compare seuil par défaut vs IQR vs clustering (KMeans)."""
     # 1) défaut
     print(f"\n######## {method_name} — seuil PAR DÉFAUT ########")
     evaluate_binary(y_true, y_pred_default, name=f"{method_name} | défaut")
@@ -134,7 +153,17 @@ def compare_thresholds(X, y_true, scores, y_pred_default, method_name="Methode")
     evaluate_binary(y_true, y_pred_iqr, name=f"{method_name} | IQR")
     plot_detection(X, y_pred_iqr, scores, f"{method_name} — IQR")
 
-    return thr_iqr, y_pred_iqr
+    # 3) Clustering KMeans (k=2) sur les scores — sans utiliser y
+    thr_cl, y_pred_cl = threshold_clustering(scores)
+    print(f"\n######## {method_name} — seuil CLUSTERING (KMeans k=2) ########")
+    print("Frontière (moyenne des centres) =", round(thr_cl, 6))
+    evaluate_binary(y_true, y_pred_cl, name=f"{method_name} | clustering")
+    plot_detection(X, y_pred_cl, scores, f"{method_name} — clustering")
+
+    return {
+        "iqr": (thr_iqr, y_pred_iqr),
+        "clustering": (thr_cl, y_pred_cl),
+    }
 
 
 
