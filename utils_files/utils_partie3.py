@@ -9,7 +9,14 @@ import numpy as np
 import pandas as pd
 from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import average_precision_score, roc_auc_score
-import utils_credit
+
+try:
+    from . import utils_credit
+except (ImportError, ValueError):
+    try:
+        from utils_files import utils_credit
+    except ImportError:
+        import utils_credit
 
 
 def definir_configurations_autoencodeurs():
@@ -48,7 +55,6 @@ def entrainer_evaluer_autoencodeurs(
     min_precision=0.80,
 ):
     """Entraîne les architectures d'Auto-encodeur MLP sur le Train (non supervisé),
-
     calcule les erreurs quadratiques de reconstruction (MSE) sur la Validation,
     recherche le seuil optimal (Précision >= 80% ou max F1) et retourne le
     tableau comparatif.
@@ -139,7 +145,6 @@ def comparer_detecteurs_non_supervises(
     min_precision=0.80,
 ):
     """Trace les courbes ROC et Précision-Rappel comparant directement
-
     Isolation Forest, Local Outlier Factor (LOF) et l'Auto-encodeur.
     """
     scores_comparaison = {
@@ -160,7 +165,6 @@ def evaluer_autoencodeur_test(
     modele_ae, X_test_s, y_test, seuil_gele, t_train=None, nom="Auto-encodeur (16-8-16)"
 ):
     """Évalue le modèle d'Auto-encodeur retenu sur le jeu de Test au seuil gelé
-
     calibré lors de la phase de validation.
     """
     X_test_pred = modele_ae.predict(X_test_s)
@@ -245,7 +249,6 @@ def tableau_recapitulatif_final(
     metriques_lr, metriques_dt, metriques_if, metriques_ae
 ):
     """Assemble et retourne le grand tableau récapitulatif comparant
-
     les 4 modèles finaux évalués sur le jeu de test gelé.
     """
     m_lr = harmoniser_metriques(
@@ -289,4 +292,3 @@ def tableau_recapitulatif_final(
         "Temps Train (s)",
     ]
     return df[colonnes]
-
