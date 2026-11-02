@@ -226,3 +226,217 @@ def tracer_f1_balanced_acc(y_true, scores, seuil_retenu=None):
   plt.tight_layout()
   plt.show()
 
+
+
+from imblearn.over_sampling import SMOTE
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+
+
+def appliquer_smote(X_train_s, y_train, random_state=42):
+    """Applique le sur-échantillonnage SMOTE uniquement sur l'ensemble Train."""
+    smote = SMOTE(random_state=random_state)
+    X_train_smote, y_train_smote = smote.fit_resample(X_train_s, y_train)
+    return X_train_smote, y_train_smote
+
+
+def evaluer_variantes_supervisees(
+    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, type_modele="lr"
+):
+    """Entraîne et compare les 3 variantes (Sans correction, Pondération, SMOTE)
+    pour la Régression Logistique ou l'Arbre de Décision.
+    """
+    if type_modele == "lr":
+        modeles = {
+            "LR (Sans correction)": LogisticRegression(max_iter=1000, random_state=42),
+            "LR (Pondération classes)": LogisticRegression(
+                class_weight="balanced", max_iter=1000, random_state=42
+            ),
+            "LR (SMOTE)": LogisticRegression(max_iter=1000, random_state=42),
+        }
+    else:
+        modeles = {
+            "Arbre (Sans correction)": DecisionTreeClassifier(max_depth=5, random_state=42),
+            "Arbre (Pondéré)": DecisionTreeClassifier(
+                max_depth=5, class_weight="balanced", random_state=42
+            ),
+            "Arbre (SMOTE)": DecisionTreeClassifier(max_depth=5, random_state=42),
+        }
+
+    scores_dict = {}
+    resultats = []
+
+    for nom, clf in modeles.items():
+        if "SMOTE" in nom:
+            clf.fit(X_train_smote, y_train_smote)
+        else:
+            clf.fit(X_train_s, y_train)
+
+        scores_val = clf.predict_proba(X_val_s)[:, 1]
+        scores_dict[nom] = scores_val
+
+        ap = average_precision_score(y_val, scores_val)
+        auc = roc_auc_score(y_val, scores_val)
+
+        resultats.append({
+            "Modèle": nom,
+            "AP (Validation)": round(ap, 4),
+            "AUC-ROC": round(auc, 4),
+        })
+
+    df_res = pd.DataFrame(resultats)
+    return df_res, scores_dict, modeles
+
+
+def evaluer_grille_lr(
+    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, min_precision=0.80
+):
+    """Évalue les 6 configurations de Régression Logistique (C=0.1, 1.0 sur les 3 variantes)."""
+    configs_lr = [
+        {"C": 0.1, "variante": "Sans correction"},
+        {"C": 1.0, "variante": "Sans correction"},
+        {"C": 0.1, "variante": "Pondération"},
+        {"C": 1.0, "variante": "Pondération"},
+        {"C": 0.1, "variante": "SMOTE"},
+        {"C": 1.0, "variante": "SMOTE"},
+    ]
+    scores_6_lr = {}
+    resultats = []
+
+    for cfg in configs_lr:
+        cw = "balanced" if cfg["variante"] == "Pondération" else None
+        clf = LogisticRegression(
+            C=cfg["C"], class_weight=cw, max_iter=1000, random_state=42
+        )
+        if cfg["variante"] == "SMOTE":
+            clf.fit(X_train_smote, y_train_smote)
+        else:
+            clf.fit(X_train_s, y_train)
+
+        scores_val = clf.predict_proba(X_val_s)[:, 1]
+        nom_cfg = f"LR ({cfg['variante']}, C={cfg['C']})"
+        scores_6_lr[nom_cfg] = scores_val
+
+        res = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
+        res["C"] = cfg["C"]
+        res["Variante"] = cfg["variante"]
+        resultats.append(res)
+
+    df_res = pd.DataFrame(resultats)
+    return df_res, scores_6_lr
+
+
+def evaluer_grille_arbre(
+    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, min_precision=0.80
+):
+    """Évalue les 6 configurations d'Arbre de Décision (max_depth=3, 5 sur les 3 variantes)."""
+    configs_dt = [
+        {"max_depth": 3, "variante": "Sans correction"},
+        {"max_depth": 5, "variante": "Sans correction"},
+        {"max_depth": 3, "variante": "Pondération"},
+        {"max_depth": 5, "variante": "Pondération"},
+        {"max_depth": 3, "variante": "SMOTE"},
+        {"max_depth": 5, "variante": "SMOTE"},
+    ]
+    scores_6_dt = {}
+    resultats = []
+
+    for cfg in configs_dt:
+        cw = "balanced" if cfg["variante"] == "Pondération" else None
+        clf = DecisionTreeClassifier(
+            max_depth=cfg["max_depth"], class_weight=cw, random_state=42
+        )
+        if cfg["variante"] == "SMOTE":
+            clf.fit(X_train_smote, y_train_smote)
+        else:
+            clf.fit(X_train_s, y_train)
+
+        scores_val = clf.predict_proba(X_val_s)[:, 1]
+        nom_cfg = f"Arbre (prof={cfg['max_depth']}, {cfg['variante']})"
+        scores_6_dt[nom_cfg] = scores_val
+
+        res = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
+        res["Profondeur"] = cfg["max_depth"]
+        res["Variante"] = cfg["variante"]
+        resultats.append(res)
+
+    df_res = pd.DataFrame(resultats)
+    return df_res, scores_6_dt
+
+
+def entrainer_modeles_non_supervises(
+    X_train_s, X_val_s, y_val, n_sub_lof=30000, random_state=42, min_precision=0.80
+):
+    """Ajuste Isolation Forest et LOF (sur sous-échantillon 30 000), harmonise les scores
+    (-score_samples) et calibre les seuils optimaux.
+    """
+    detecteurs = {
+        "Isolation Forest": IsolationForest(
+            n_estimators=100, random_state=random_state, n_jobs=-1
+        ),
+        "Local Outlier Factor (LOF)": LocalOutlierFactor(
+            n_neighbors=20, novelty=True
+        ),
+    }
+
+    X_train_sub = X_train_s.sample(n=n_sub_lof, random_state=random_state)
+    scores_non_sup_dict = {}
+    resultats = []
+
+    print("--- Entraînement des détecteurs non supervisés ---")
+    for nom, clf in detecteurs.items():
+        print(f"Entraînement de {nom}...")
+        if "LOF" in nom:
+            clf.fit(X_train_sub)
+        else:
+            clf.fit(X_train_s)
+
+        # Inversion du signe pour harmoniser : score élevé = anomalie
+        scores_val = -clf.score_samples(X_val_s)
+        scores_non_sup_dict[nom] = scores_val
+
+        res = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
+        res["Modèle"] = nom
+        resultats.append(res)
+
+    df_res = pd.DataFrame(resultats)
+    return df_res, scores_non_sup_dict, detecteurs
+
+
+def evaluer_modeles_test_partie2(
+    X_train_s, y_train, X_test_s, y_test, iso_forest, seuil_lr, seuil_dt=0.05, seuil_if=0.6569
+):
+    """Évalue sur l'ensemble de Test gelé les 3 modèles retenus de la Partie 2
+    aux seuils calibrés sur la validation.
+    """
+    # 1. Régression Logistique (C=1.0)
+    lr_best = LogisticRegression(C=1.0, max_iter=1000, random_state=42)
+    lr_best.fit(X_train_s, y_train)
+    scores_test_lr = lr_best.predict_proba(X_test_s)[:, 1]
+    res_test_best = evaluer_seuil(y_test, scores_test_lr, seuil=seuil_lr)
+    res_test_best["AP"] = round(average_precision_score(y_test, scores_test_lr), 4)
+    res_test_best["AUC-ROC"] = round(roc_auc_score(y_test, scores_test_lr), 4)
+    res_test_best["Modèle"] = "Régression Logistique (C=1.0) [TEST]"
+    res_test_best["Temps Train (s)"] = 0.47
+
+    # 2. Arbre de Décision (depth=5)
+    tree_best = DecisionTreeClassifier(max_depth=5, random_state=42)
+    tree_best.fit(X_train_s, y_train)
+    scores_test_tree = tree_best.predict_proba(X_test_s)[:, 1]
+    res_test_tree = evaluer_seuil(y_test, scores_test_tree, seuil=seuil_dt)
+    res_test_tree["AP"] = round(average_precision_score(y_test, scores_test_tree), 4)
+    res_test_tree["AUC-ROC"] = round(roc_auc_score(y_test, scores_test_tree), 4)
+    res_test_tree["Modèle"] = "Arbre de Décision (depth=5) [TEST]"
+    res_test_tree["Temps Train (s)"] = 2.35
+
+    # 3. Isolation Forest
+    scores_test_if = -iso_forest.score_samples(X_test_s)
+    res_test_if = evaluer_seuil(y_test, scores_test_if, seuil=seuil_if)
+    res_test_if["AP"] = round(average_precision_score(y_test, scores_test_if), 4)
+    res_test_if["AUC-ROC"] = round(roc_auc_score(y_test, scores_test_if), 4)
+    res_test_if["Modèle"] = "Isolation Forest [TEST]"
+    res_test_if["Temps Train (s)"] = 4.77
+
+    return res_test_best, res_test_tree, res_test_if, scores_test_if
