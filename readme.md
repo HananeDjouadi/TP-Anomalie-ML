@@ -1,29 +1,32 @@
 # Atelier Pratique : Détection d'anomalies (Master 2 Data Science)
 
-Projet académique de Machine Learning — Détection d'anomalies, détection de fraudes bancaires et explicabilité des modèles.  
+Projet académique de Machine Learning — Détection d'anomalies, détection de fraudes bancaires, robustesse et explicabilité des modèles.  
 **Enseignants :** Haytham Elghazel & Heidi Souibki  
 **Université Claude Bernard Lyon 1** — Année Universitaire 2026-2027
 
 ---
 
-## Structure du Projet
+## 📁 Structure du Projet
 
 ```text
 TP-Anomalie-ML/
 │
 ├── data/                                      # Jeux de données
 │   ├── creditcard.csv                         # Fraudes bancaires (284 807 transactions initiales, 31 colonnes)
-│   ├── mouse.txt                              # Données synthétiques 2D (Partie 1)
+│   ├── mouse.txt                              # Données synthétiques 2D (Parties 1 et 5.1)
 │   └── ai4i2020.csv                           # Maintenance prédictive industrielle (Partie 4)
 │
 ├── notebook/                                  # Notebooks Jupyter et scripts modulaires
-│   ├── partie2et3_fraudes.ipynb               # Notebook complet : Fraudes, Auto-encodeur & SHAP
+│   ├── mouse.ipynb                            # Notebook : Données synthétiques 2D et Robustesse (Parties 1 & 5.1)
+│   ├── partie2et3_fraudes.ipynb               # Notebook complet : Fraudes, Auto-encodeur & SHAP (Parties 2, 3 & 5.2)
+│   ├── utils_partie5.py                       # Fonctions modulaires pour la Partie 5 (Robustesse & SHAP)
 │   ├── utils_credit.py                        # Fonctions modulaires étanches (prétraitements, seuils, courbes)
-│   ├── utils.py                               # Utilitaires généraux
-│   └── principal.ipynb                        # Notebook d'assemblage global
+│   ├── utils_mouse.py                         # Utilitaires pour les données Mouse
+│   └── utils.py                               # Utilitaires généraux
 │
 ├── les syntheses/                             # Rapports académiques de synthèse
-│   └── Rapport_Partie2_et_3_Detection_Fraudes.md  # Rapport exhaustif des Parties 2, 3 et Explicabilité SHAP
+│   ├── Rapport_Partie2_et_3_Detection_Fraudes.md      # Rapport exhaustif des Parties 2 & 3
+│   └── Rapport_Partie5_Robustesse_et_Explicabilite.md # Rapport dédié de la Partie 5 (Robustesse & SHAP)
 │
 ├── requirements.txt                           # Dépendances Python du projet
 └── README.md                                  # Présentation générale du projet et résultats
@@ -31,7 +34,7 @@ TP-Anomalie-ML/
 
 ---
 
-## Travaux Réalisés et Synthèse Méthodologique
+## 🎯 Travaux Réalisés et Synthèse Méthodologique
 
 ### Partie 1 : Données Synthétiques 2D (`mouse.txt`)
 * Exploration des distributions en dimension 2 et comportement des estimateurs de densité de base.
@@ -73,20 +76,19 @@ TP-Anomalie-ML/
 
 ---
 
-### Partie Spéciale : Explicabilité des Alertes avec SHAP sur Isolation Forest
-* **Protocole :** Explication par `shap.TreeExplainer` de **6 observations de test** (2 Vrais Positifs, 2 Faux Positifs, 2 Faux Négatifs) avec un *background dataset* de 50 observations issues strictement du Train.
-* **Identification de la grandeur interne expliquée :** L'outil explique la **longueur de chemin moyenne $f(x)$** (la profondeur dans l'arbre) :
-  * Valeur attendue normale : $\mathbb{E}[f(X)] = 13.288$ coupes.
-  * Fraudes détectées ($TP$) : $f(x)$ s'effondre à **$5.80$** et **$4.05$** coupes (les valeurs extrêmes de $V_8, V_3, V_1, V_5$ raccourcissent le chemin $\implies$ contributions SHAP négatives $\phi_j < 0$).
-  * Fausses alertes ($FP$) : $f(x)$ chute à **$6.20$** et **$5.76$** coupes sous l'effet de composantes marginales ($V_1, V_2, V_8$), prouvant l'erreur d'aiguillage du modèle non supervisé sur des clients honnêtes atypiques.
-  * Fraudes manquées ($FN$) : $f(x) > 11.8$ coupes (fraudes mimétiques au profil médian).
-* **Mise en garde épistémologique :**
-  1. Une contribution SHAP forte est une **corrélation exploitée par l'algorithme, pas une preuve de causalité**.
-  2. Les variables $V_1 \dots V_{28}$ étant issues d'une ACP anonymisée, **SHAP n'en restaure pas la signification métier**.
+### Partie 5 : Robustesse et Explicabilité (Synthèse Dédiée)
+1. **Partie 5.1 — Robustesse à la contamination (Mouse) :**
+   * Injection d'anomalies synthétiques gaussiennes ($3\sigma$) à des taux de $0\%$, $5\%$ et $10\%$ sur l'apprentissage normal.
+   * Évaluation sur test réel fixé : LOF démontre une insensibilité totale ($\text{AP} \approx 0.98 \pm 0.01$), tandis qu'Isolation Forest voit sa variance s'accroître ($\text{AP} = 0.748 \to 0.863 \pm 0.095$).
+2. **Partie 5.2 — Explicabilité des alertes avec SHAP (Credit Card) :**
+   * Explication par `shap.TreeExplainer` de **6 observations de test** (2 TP, 2 FP, 2 FN) avec un *background dataset* de 50 observations issues du Train.
+   * Grandeur interne expliquée : la profondeur moyenne $f(x)$ par rapport à $\mathbb{E}[f(X)] = 13.288$ coupes.
+   * Analyse des contributions : les valeurs extrêmes de $V_8, V_3, V_1, V_5$ réduisent drastiquement le chemin pour les fraudes ($f(x) \approx 4\text{ à }5.8$), tandis que des profils de consommation atypiques mais honnêtes font chuter $f(x)$ à $5.7\text{ à }6.2$ (fausses alertes).
+   * Mises en garde méthodologiques : corrélation $\neq$ causalité, et variables ACP anonymisées dont le sens métier n'est pas restaurable.
 
 ---
 
-## Tableau Récapitulatif Final sur le Jeu de Test (56 746 transactions)
+## 📊 Tableau Récapitulatif Final sur le Jeu de Test (56 746 transactions)
 
 | Modèle | Statut | Prétraitement | Variante | Seuil $\tau^*$ | Précision | Rappel | F1-score | AP | AUC-ROC | TP | FP | FN |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -97,7 +99,7 @@ TP-Anomalie-ML/
 
 ---
 
-## Installation et Reproduction
+## ⚙️ Installation et Reproduction
 
 ### 1. Cloner le dépôt et installer l'environnement
 ```bash
@@ -106,16 +108,21 @@ cd TP-Anomalie-ML
 pip install -r requirements.txt
 ```
 
-### 2. Lancer le notebook Jupyter
+### 2. Lancer les notebooks Jupyter
 ```bash
 cd notebook
+# Pour la Partie 1 et la Partie 5.1 (Mouse) :
+jupyter notebook mouse.ipynb
+
+# Pour la Partie 2, la Partie 3 et la Partie 5.2 (Credit Card & SHAP) :
 jupyter notebook partie2et3_fraudes.ipynb
 ```
 
 ---
 
-## Références Bibliographiques
+## 📑 Références Bibliographiques
 * **Sakurada, M., & Yairi, T. (2014).** *Anomaly detection using autoencoders with nonlinear dimensionality reduction.* IEEE/ACM MLSDA.
 * **Liu, F. T., Ting, K. M., & Zhou, Z. H. (2008).** *Isolation Forest.* IEEE ICDM.
 * **Lundberg, S. M., & Lee, S. I. (2017).** *A unified approach to interpreting model predictions.* NeurIPS (SHAP).
+* **Breunig, M. M. et al. (2000).** *LOF: Identifying Density-Based Local Outliers.* ACM SIGMOD.
 * **Chawla, N. V. et al. (2002).** *SMOTE: Synthetic Minority Over-sampling Technique.* JAIR.
