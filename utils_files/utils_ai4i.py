@@ -77,3 +77,46 @@ def preprocess_ai4i(X_train, X_val, X_test):
     X_val_p = preprocessor.transform(X_val)
     X_test_p = preprocessor.transform(X_test)
     return X_train_p, X_val_p, X_test_p, preprocessor, cat_cols, num_cols
+
+
+import time
+from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LogisticRegression
+
+
+def fit_isolation_forest_ai4i(
+    X_train, X_val, X_test, n_estimators=100, random_state=42, n_jobs=-1
+):
+    """
+    Isolation Forest (hyperparams Credit Card) réentraîné sur AI4I.
+    Scores : plus haut = plus suspect (-score_samples).
+    Retourne model, scores_val, scores_test, temps.
+    """
+    t0 = time.time()
+    model = IsolationForest(
+        n_estimators=n_estimators,
+        contamination="auto",
+        random_state=random_state,
+        n_jobs=n_jobs,
+    )
+    model.fit(X_train)
+    elapsed = time.time() - t0
+    scores_val = -model.score_samples(X_val)
+    scores_test = -model.score_samples(X_test)
+    return model, scores_val, scores_test, elapsed
+
+
+def fit_logistic_regression_ai4i(
+    X_train, y_train, X_val, X_test, C=1.0, max_iter=1000, random_state=42
+):
+    """
+    Régression logistique (meilleur modèle Credit Card) réentraînée sur AI4I.
+    Retourne model, scores_val, scores_test, temps (proba classe 1).
+    """
+    t0 = time.time()
+    model = LogisticRegression(C=C, max_iter=max_iter, random_state=random_state)
+    model.fit(X_train, y_train)
+    elapsed = time.time() - t0
+    scores_val = model.predict_proba(X_val)[:, 1]
+    scores_test = model.predict_proba(X_test)[:, 1]
+    return model, scores_val, scores_test, elapsed

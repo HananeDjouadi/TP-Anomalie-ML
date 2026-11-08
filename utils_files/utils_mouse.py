@@ -92,7 +92,13 @@ def plot_detection(X, y_pred, scores, title):
     plt.show()
 
 
-from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.metrics import (
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    balanced_accuracy_score,
+)
 from sklearn.cluster import KMeans
 
 
@@ -128,15 +134,34 @@ def threshold_clustering(scores, random_state=42):
 
 
 def evaluate_binary(y_true, y_pred, name=""):
-    """Évaluation après seuil : confusion + F1 (y seulement pour évaluer)."""
+    """
+    Évaluation après seuil (protocole §2) :
+    confusion, précision, rappel, F1 (classe 1), balanced accuracy.
+    Les labels y servent uniquement à évaluer.
+    """
     cm = confusion_matrix(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, pos_label=1)
-    n_alertes = int(y_pred.sum())
+    precision = precision_score(y_true, y_pred, pos_label=1, zero_division=0)
+    recall = recall_score(y_true, y_pred, pos_label=1, zero_division=0)
+    f1 = f1_score(y_true, y_pred, pos_label=1, zero_division=0)
+    bal_acc = balanced_accuracy_score(y_true, y_pred)
+    n_alertes = int(np.asarray(y_pred).sum())
+
     print(f"\n=== {name} ===")
     print("Seuil → nb alertes :", n_alertes)
     print("Matrice de confusion [[TN FP],[FN TP]] :\n", cm)
-    print("F1 (classe anomalie) :", round(f1, 4))
-    return {"confusion": cm, "f1": f1, "n_alertes": n_alertes}
+    print("Précision (classe anomalie) :", round(precision, 4))
+    print("Rappel    (classe anomalie) :", round(recall, 4))
+    print("F1        (classe anomalie) :", round(f1, 4))
+    print("Balanced accuracy           :", round(bal_acc, 4))
+
+    return {
+        "confusion": cm,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "balanced_accuracy": bal_acc,
+        "n_alertes": n_alertes,
+    }
 
 
 def compare_thresholds(X, y_true, scores, y_pred_default, method_name="Methode"):
@@ -193,6 +218,28 @@ def plot_ranking_curves(y_true, scores, name="Methode"):
 
     plt.tight_layout()
     plt.show()
+
+
+def demonstrate_threshold_independence(y_true, scores, y_pred_default, name="Methode"):
+    """
+    Preuve pédagogique : changer le seuil change y_pred, pas les scores
+    → AP / AUC restent identiques (ils n'utilisent pas y_pred).
+    """
+    _, y_pred_iqr = threshold_iqr(scores)
+    ap = average_precision_score(y_true, scores)
+    auc = roc_auc_score(y_true, scores)
+    print(f"\n--- Preuve sur {name} : le seuil change les décisions, pas AP/AUC ---")
+    print("Nb alertes seuil défaut :", int(np.asarray(y_pred_default).sum()))
+    print("Nb alertes seuil IQR    :", int(y_pred_iqr.sum()))
+    print("AP  (mêmes scores) :", round(ap, 4))
+    print("AUC (mêmes scores) :", round(auc, 4))
+    print("(AP/AUC ne prennent pas y_pred en entrée, seulement scores + y_true)")
+    return {
+        "AP": ap,
+        "AUC_ROC": auc,
+        "n_default": int(np.asarray(y_pred_default).sum()),
+        "n_iqr": int(y_pred_iqr.sum()),
+    }
 
 
 from sklearn.model_selection import train_test_split

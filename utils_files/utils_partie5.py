@@ -132,9 +132,36 @@ def plot_ap_vs_contamination(df_summary, title="Robustesse — AP vs contaminati
     plt.show()
 
 
+def plot_contamination_example(
+    X_train_clean,
+    X_contaminated,
+    title="Exemple : train propre vs train contaminé à 10 %",
+):
+    """Scatter 2D : train 0 % vs train contaminé (même taille)."""
+    plt.figure(figsize=(6, 6))
+    plt.scatter(
+        X_train_clean["x1"],
+        X_train_clean["x2"],
+        s=15,
+        alpha=0.5,
+        label="Train 0%",
+    )
+    plt.scatter(
+        X_contaminated["x1"],
+        X_contaminated["x2"],
+        s=15,
+        alpha=0.5,
+        label="Train contaminé",
+    )
+    plt.legend()
+    plt.axis("equal")
+    plt.title(title)
+    plt.show()
+
 
 # Partie 5.2 — Explication des alertes avec SHAP (Credit Card)
-import shap
+# shap est importé seulement dans les fonctions qui en ont besoin
+# pour ne pas bloquer la Partie 5.1 si shap n'est pas installé.
 
 
 def select_six_test_cases(X_test, y_test, scores_if, seuil_if):
@@ -197,6 +224,8 @@ def compute_shap_isolation_forest(
       - explainer : instance de shap.TreeExplainer
       - shap_values : objet Explanation contenant les valeurs SHAP
     """
+    import shap
+
     background = X_train.sample(n_background, random_state=random_state)
     explainer = shap.TreeExplainer(iso_forest, data=background)
     shap_values = explainer(X_cases)
@@ -205,100 +234,8 @@ def compute_shap_isolation_forest(
 
 def plot_shap_waterfalls(shap_values, obs_dict, scores_if, seuil_if, max_display=8):
     """Affiche les diagrammes SHAP Waterfall pour chacune des observations sélectionnées."""
-    scores_series = (
-        scores_if if isinstance(scores_if, pd.Series) else pd.Series(scores_if)
-    )
-    for idx, (cat_name, row_idx) in enumerate(obs_dict.items()):
-        score_val = (
-            scores_series.loc[row_idx]
-            if row_idx in scores_series.index
-            else scores_series.iloc[idx]
-        )
-        plt.figure(figsize=(9, 4))
-        plt.title(
-            f"Explication SHAP : {cat_name} (Index {row_idx})\n"
-            f"Score IF = {score_val:.4f} (Seuil = {seuil_if:.4f})",
-            fontsize=11,
-            fontweight="bold",
-        )
-        shap.plots.waterfall(shap_values[idx], max_display=max_display, show=False)
-        plt.tight_layout()
-        plt.show()
+    import shap
 
-
-
-# Partie 5.2 — Explication des alertes avec SHAP (Credit Card)
-import shap
-
-
-def select_six_test_cases(X_test, y_test, scores_if, seuil_if):
-    """Sélectionne 6 observations de test : 2 TP, 2 FP, 2 FN selon le seuil d'Isolation Forest.
-
-    Retourne :
-      - obs_dict : dictionnaire {nom_categorie: index_test}
-      - X_six : sous-ensemble des 6 observations (DataFrame)
-      - df_summary : tableau récapitulatif des métadonnées des 6 cas
-    """
-    scores_series = (
-        pd.Series(scores_if, index=X_test.index)
-        if not isinstance(scores_if, pd.Series)
-        else scores_if
-    )
-    pred_series = (scores_series >= seuil_if).astype(int)
-
-    # 1. Deux fraudes détectées (TP) : y == 1 et pred == 1
-    idx_tp = y_test[(y_test == 1) & (pred_series == 1)].index[:2]
-    # 2. Deux fausses alertes (FP) : y == 0 et pred == 1
-    idx_fp = y_test[(y_test == 0) & (pred_series == 1)].index[:2]
-    # 3. Deux fraudes manquées (FN) : y == 1 et pred == 0
-    idx_fn = y_test[(y_test == 1) & (pred_series == 0)].index[:2]
-
-    obs_dict = {
-        "TP1 (Fraude détectée)": idx_tp[0],
-        "TP2 (Fraude détectée)": idx_tp[1],
-        "FP1 (Fausse alerte)": idx_fp[0],
-        "FP2 (Fausse alerte)": idx_fp[1],
-        "FN1 (Fraude manquée)": idx_fn[0],
-        "FN2 (Fraude manquée)": idx_fn[1],
-    }
-
-    X_six = X_test.loc[list(obs_dict.values())]
-
-    df_summary = pd.DataFrame(
-        {
-            "Catégorie": list(obs_dict.keys()),
-            "Index Test": list(obs_dict.values()),
-            "Vraie Classe (y)": [y_test.loc[i] for i in obs_dict.values()],
-            "Prédiction IF": [pred_series.loc[i] for i in obs_dict.values()],
-            "Score Anomaly IF": [
-                round(scores_series.loc[i], 4) for i in obs_dict.values()
-            ],
-            "Seuil Retenu": round(seuil_if, 4),
-        }
-    )
-
-    return obs_dict, X_six, df_summary
-
-
-def compute_shap_isolation_forest(
-    iso_forest, X_train, X_cases, n_background=50, random_state=42
-):
-    """Initialise TreeExplainer avec un échantillon de référence (background)
-
-    issu strictement du train et calcule les valeurs SHAP pour les observations cibles.
-
-    Retourne :
-      - explainer : instance de shap.TreeExplainer
-      - shap_values : objet Explanation contenant les valeurs SHAP
-    """
-    background = X_train.sample(n_background, random_state=random_state)
-    explainer = shap.TreeExplainer(iso_forest, data=background)
-    shap_values = explainer(X_cases)
-    return explainer, shap_values
-
-
-def plot_shap_waterfalls(shap_values, obs_dict, scores_if, seuil_if, max_display=8):
-    """Affiche les diagrammes SHAP Waterfall pour chacune des observations sélectionnées."""
     scores_series = (
         scores_if if isinstance(scores_if, pd.Series) else pd.Series(scores_if)
     )
