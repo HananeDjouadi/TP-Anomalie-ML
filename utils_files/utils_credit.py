@@ -20,6 +20,9 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 
+import time
+from sklearn.base import clone
+
 
 def examiner_donnees_brutes(filepath="../data/creditcard.csv"):
     """Charge le fichier CSV brut et affiche un résumé complet :
@@ -362,63 +365,6 @@ def selectionner_meilleure_config(df_res):
         statut = "Objectif non atteint (aucune config avec Précision >= 80%)"
     meilleur = df_ok.sort_values(by=["Rappel", "Précision", "AP"], ascending=False).iloc[0]
     return meilleur, statut
-
-
-def tracer_f1_balanced_acc(y_true, scores, seuil_retenu=None):
-    """Trace l'évolution du F1-score et de la Balanced Accuracy en fonction du seuil."""
-    seuils = np.linspace(0.01, 0.99, 150)
-    f1_list = []
-    bacc_list = []
-
-    for t in seuils:
-        y_pred = (scores >= t).astype(int)
-        f1_list.append(f1_score(y_true, y_pred, zero_division=0))
-        bacc_list.append(balanced_accuracy_score(y_true, y_pred))
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(seuils, f1_list, label="F1-score", color="blue", linewidth=2)
-    plt.plot(
-        seuils,
-        bacc_list,
-        label="Balanced Accuracy",
-        color="forestgreen",
-        linewidth=2,
-    )
-
-    best_t_f1 = seuils[np.argmax(f1_list)]
-    best_t_bacc = seuils[np.argmax(bacc_list)]
-
-    plt.axvline(
-        best_t_f1,
-        color="blue",
-        linestyle=":",
-        alpha=0.7,
-        label=f"Max F1 ({best_t_f1:.2f})",
-    )
-    plt.axvline(
-        best_t_bacc,
-        color="forestgreen",
-        linestyle=":",
-        alpha=0.7,
-        label=f"Max Balanced Acc ({best_t_bacc:.2f})",
-    )
-
-    if seuil_retenu is not None:
-        plt.axvline(
-            seuil_retenu,
-            color="red",
-            linestyle="--",
-            linewidth=2,
-            label=f"Seuil retenu (Précision>=80%) : {seuil_retenu:.4f}",
-        )
-
-    plt.title("Évolution du F1-score et de la Balanced Accuracy selon le seuil")
-    plt.xlabel("Seuil de décision")
-    plt.ylabel("Score")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
 
 
 def appliquer_smote(X_train_s, y_train, random_state=42):
@@ -863,38 +809,184 @@ def entrainer_modeles_non_supervises(
     return df_res, scores_non_sup_dict, detecteurs
 
 
-def evaluer_modeles_test_partie2(
-    X_train_s, y_train, X_test_s, y_test, iso_forest, seuil_lr, seuil_dt=0.05, seuil_if=0.6569
-):
-    """Évalue sur l'ensemble de Test gelé les 3 modèles retenus de la Partie 2
-    aux seuils calibrés sur la validation.
-    """
-    # 1. Régression Logistique (C=1.0)
-    lr_best = LogisticRegression(C=1.0, max_iter=1000, random_state=42)
-    lr_best.fit(X_train_s, y_train)
-    scores_test_lr = lr_best.predict_proba(X_test_s)[:, 1]
-    res_test_best = evaluer_seuil(y_test, scores_test_lr, seuil=seuil_lr)
-    res_test_best["AP"] = round(average_precision_score(y_test, scores_test_lr), 4)
-    res_test_best["AUC-ROC"] = round(roc_auc_score(y_test, scores_test_lr), 4)
-    res_test_best["Modèle"] = "Régression Logistique (C=1.0) [TEST]"
-    res_test_best["Temps Train (s)"] = 0.47
+# partie 3 : Évaluer les scores et fixer le seuil 
 
-    # 2. Arbre de Décision (depth=5)
-    tree_best = DecisionTreeClassifier(max_depth=5, random_state=42)
-    tree_best.fit(X_train_s, y_train)
-    scores_test_tree = tree_best.predict_proba(X_test_s)[:, 1]
-    res_test_tree = evaluer_seuil(y_test, scores_test_tree, seuil=seuil_dt)
-    res_test_tree["AP"] = round(average_precision_score(y_test, scores_test_tree), 4)
-    res_test_tree["AUC-ROC"] = round(roc_auc_score(y_test, scores_test_tree), 4)
-    res_test_tree["Modèle"] = "Arbre de Décision (depth=5) [TEST]"
-    res_test_tree["Temps Train (s)"] = 2.35
+def tableau_ap_auc(y_true, modeles_scores, configurations):
+    lignes = [
+        {
+            "Modèle": nom,
+            "Configuration": configurations[nom],
+            "AP (Validation)": round(average_precision_score(y_true, scores), 4),
+            "AUC-ROC (Validation)": round(roc_auc_score(y_true, scores), 4),
+        }
+        for nom, scores in modeles_scores.items()
+    ]
+    return pd.DataFrame(lignes).sort_values("AP (Validation)", ascending=False).reset_index(drop=True)
 
-    # 3. Isolation Forest
-    scores_test_if = -iso_forest.score_samples(X_test_s)
-    res_test_if = evaluer_seuil(y_test, scores_test_if, seuil=seuil_if)
-    res_test_if["AP"] = round(average_precision_score(y_test, scores_test_if), 4)
-    res_test_if["AUC-ROC"] = round(roc_auc_score(y_test, scores_test_if), 4)
-    res_test_if["Modèle"] = "Isolation Forest [TEST]"
-    res_test_if["Temps Train (s)"] = 4.77
 
-    return res_test_best, res_test_tree, res_test_if, scores_test_if
+def seuils_validation(y_true, modeles_scores, seuils_defaut, min_precision=0.80):
+    lignes = []
+    for nom, scores in modeles_scores.items():
+        res = trouver_meilleur_seuil(y_true, scores, min_precision=min_precision)
+        defaut = evaluer_seuil(y_true, scores, seuil=seuils_defaut[nom])
+        lignes.append({
+            "Modèle": nom,
+            "Seuil par défaut": seuils_defaut[nom],
+            "Précision (défaut)": defaut["Précision"],
+            "Rappel (défaut)": defaut["Rappel"],
+            "Seuil optimal": res["Seuil"],
+            "Précision (optimal)": res["Précision"],
+            "Rappel (optimal)": res["Rappel"],
+            "Contrainte (>=80%)": res["Contrainte (>=80%)"],
+        })
+    return pd.DataFrame(lignes)
+
+
+def tracer_f1_balanced_acc(y_true, scores, seuil_retenu=None):
+    y_true = np.asarray(y_true)
+    fpr, tpr, seuils = roc_curve(y_true, scores, drop_intermediate=False)
+    fpr, tpr, seuils = fpr[1:], tpr[1:], seuils[1:]
+
+    n_pos = int(y_true.sum())
+    n_neg = len(y_true) - n_pos
+    tp = np.round(tpr * n_pos)
+    alertes = tp + np.round(fpr * n_neg)
+
+    precision = np.divide(tp, alertes, out=np.zeros_like(tp), where=alertes > 0)
+    somme = precision + tpr
+    f1 = np.divide(2 * precision * tpr, somme, out=np.zeros_like(tp), where=somme > 0)
+    bacc = (tpr + 1 - fpr) / 2
+
+    i_f1 = int(np.argmax(f1))
+    i_bacc = int(np.argmax(bacc))
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    for ax in axes:
+        ax.plot(seuils, f1, color="blue", linewidth=2, label="F1-score")
+        ax.plot(seuils, bacc, color="forestgreen", linewidth=2, label="Balanced Accuracy")
+        ax.scatter(
+            seuils[i_f1], f1[i_f1], color="blue", s=80, zorder=5,
+            label=f"Max F1 = {f1[i_f1]:.3f} (seuil {seuils[i_f1]:.4f})",
+        )
+        ax.scatter(
+            seuils[i_bacc], bacc[i_bacc], color="forestgreen", marker="s", s=80, zorder=5,
+            label=f"Max Balanced Acc = {bacc[i_bacc]:.3f} (seuil {seuils[i_bacc]:.4f})",
+        )
+        if seuil_retenu is not None:
+            retenu = evaluer_seuil(y_true, scores, seuil=seuil_retenu)
+            ax.axvline(
+                seuil_retenu, color="red", linestyle="--", linewidth=1.5,
+                label=f"Précision >= 80% : seuil {seuil_retenu:.4f}",
+            )
+            ax.scatter(
+                [seuil_retenu] * 2, [retenu["F1-score"], retenu["Balanced Accuracy"]],
+                color="red", s=60, zorder=6,
+            )
+        ax.set_xlabel("Seuil de décision")
+        ax.set_ylabel("Score")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    axes[0].set_title("Vue complète")
+    axes[1].set_title("Zoom autour du seuil retenu")
+    if seuil_retenu is not None:
+        axes[1].set_xlim(seuil_retenu - 0.01, seuil_retenu + 0.01)
+    plt.tight_layout()
+    plt.show()
+
+
+def partie_3a(y_val, scores_6_lr, scores_6_dt, scores_non_sup_dict, df_eval_non_sup, min_precision=0.80):
+    modeles_scores = {
+        "Régression Logistique": scores_6_lr["LR (SMOTE, C=0.01)"],
+        "Arbre de décision": scores_6_dt["Arbre (prof=5, Sans correction)"],
+        "Isolation Forest": scores_non_sup_dict["Isolation Forest"],
+        "Local Outlier Factor (LOF)": scores_non_sup_dict["Local Outlier Factor (LOF)"],
+    }
+    configurations = {
+        "Régression Logistique": "C=0.01, avec SMOTE",
+        "Arbre de décision": "max_depth=5, sans correction",
+        "Isolation Forest": df_eval_non_sup.loc[
+            df_eval_non_sup["Modèle"] == "Isolation Forest", "Hyperparamètres"
+        ].iloc[0],
+        "Local Outlier Factor (LOF)": df_eval_non_sup.loc[
+            df_eval_non_sup["Modèle"] == "Local Outlier Factor (LOF)", "Hyperparamètres"
+        ].iloc[0],
+    }
+
+    tableau = tableau_ap_auc(y_val, modeles_scores, configurations)
+
+    seuils_defaut = {
+        "Régression Logistique": 0.5,
+        "Arbre de décision": 0.5,
+        "Isolation Forest": 0.5,
+        "Local Outlier Factor (LOF)": 1.5,
+    }
+    seuils = seuils_validation(y_val, modeles_scores, seuils_defaut, min_precision=min_precision)
+    tracer_courbes_roc_pr(y_val, modeles_scores, min_precision=min_precision)
+
+    seuil_lr = seuils.loc[seuils["Modèle"] == "Régression Logistique", "Seuil optimal"].iloc[0]
+    tracer_f1_balanced_acc(y_val, modeles_scores["Régression Logistique"], seuil_retenu=seuil_lr)
+
+    return tableau, seuils
+
+
+
+def partie_3c(X_train_s, y_train, X_test_s, y_test, X_train_lof, detecteurs, seuils):
+    def seuil_de(modele):
+        return seuils.loc[seuils["Modèle"] == modele, "Seuil optimal"].iloc[0]
+
+    def chrono(fonction):
+        debut = time.perf_counter()
+        resultat = fonction()
+        return resultat, time.perf_counter() - debut
+
+    def lr_smote():
+        X_sm, y_sm = appliquer_smote(X_train_s, y_train)
+        return LogisticRegression(C=0.01, max_iter=1000, random_state=42).fit(X_sm, y_sm)
+
+    def arbre():
+        return DecisionTreeClassifier(max_depth=5, random_state=42).fit(X_train_s, y_train)
+
+    def ligne(modele, methode, pretraitement, desequilibre, scores, temps):
+        seuil = seuil_de(modele)
+        m = evaluer_seuil(y_test, scores, seuil=seuil)
+        return {
+            "Modèle": modele,
+            "Méthode": methode,
+            "Prétraitement": pretraitement,
+            "Traitement du déséquilibre": desequilibre,
+            "AP": round(average_precision_score(y_test, scores), 4),
+            "AUC-ROC": round(roc_auc_score(y_test, scores), 4),
+            "Seuil retenu": seuil,
+            "Précision": m["Précision"],
+            "Rappel": m["Rappel"],
+            "F1-score": m["F1-score"],
+            "Balanced Accuracy": m["Balanced Accuracy"],
+            "TP (Fraudes détectées)": m["TP (Fraudes détectées)"],
+            "FP (Fausses alertes)": m["FP (Fausses alertes)"],
+            "FN (Fraudes manquées)": m["FN (Fraudes manquées)"],
+            "TN (Normales correctes)": m["TN (Normales correctes)"],
+            "Temps entraînement (s)": round(temps, 2),
+        }
+
+    lr, t_lr = chrono(lr_smote)
+    arbre_clf, t_arbre = chrono(arbre)
+    if_clf, t_if = chrono(lambda: clone(detecteurs["Isolation Forest"]).fit(np.asarray(X_train_s)))
+    lof_clf, t_lof = chrono(lambda: clone(detecteurs["Local Outlier Factor (LOF)"]).fit(np.asarray(X_train_lof)))
+
+    scores_lr = lr.predict_proba(X_test_s)[:, 1]
+    scores_arbre = arbre_clf.predict_proba(X_test_s)[:, 1]
+    scores_if = -if_clf.score_samples(np.asarray(X_test_s))
+    scores_lof = -lof_clf.score_samples(np.asarray(X_test_s))
+
+    tableau = pd.DataFrame([
+        ligne("Régression Logistique", "Régression Logistique (C=0.01)", "RobustScaler sur Amount", "SMOTE (Train)", scores_lr, t_lr),
+        ligne("Arbre de décision", "Arbre de décision (max_depth=5)", "RobustScaler sur Amount", "Aucun", scores_arbre, t_arbre),
+        ligne("Isolation Forest", f"Isolation Forest (n_estimators={if_clf.n_estimators}, max_samples={if_clf.max_samples})", "RobustScaler sur Amount", "Aucun (non supervisé)", scores_if, t_if),
+        ligne("Local Outlier Factor (LOF)", f"LOF (n_neighbors={lof_clf.n_neighbors})", "RobustScaler sur Amount", "Aucun (non supervisé)", scores_lof, t_lof),
+    ])
+
+    valides = seuils[seuils["Contrainte (>=80%)"] == "Atteint"]
+    retenu = valides.sort_values("Rappel (optimal)", ascending=False)["Modèle"].iloc[0]
+    tableau["Sélectionné (validation)"] = np.where(tableau["Modèle"] == retenu, "Oui", "")
+    return tableau
