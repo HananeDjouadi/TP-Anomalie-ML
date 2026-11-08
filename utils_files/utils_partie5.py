@@ -236,6 +236,14 @@ def plot_shap_waterfalls(
         plt.tight_layout()
         plt.show()
 
+def importance_par_categorie(shap_values, obs_dict):
+    codes = [c[:2] for c in obs_dict]
+    df = pd.DataFrame(np.abs(shap_values.values),
+                      columns=shap_values.feature_names)
+    df["cat"] = codes
+    return (df.groupby("cat").mean().T
+              .sort_values("TP", ascending=False)
+              .round(3))
 
 def contribution_signee_par_categorie(shap_values, obs_dict):
     codes = [c[:2] for c in obs_dict]
