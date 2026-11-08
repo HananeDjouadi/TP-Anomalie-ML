@@ -406,17 +406,69 @@ def tracer_f1_balanced_acc(y_true, scores, seuil_retenu=None):
 
 
 def appliquer_smote(X_train_s, y_train, random_state=42):
-    """Applique le sur-échantillonnage SMOTE uniquement sur l'ensemble Train."""
+    """Applique le sur-échantillonnage SMOTE uniquement sur l'ensemble Train
+    et affiche les effectifs avant et après rééchantillonnage.
+    """
     smote = SMOTE(random_state=random_state)
     X_train_smote, y_train_smote = smote.fit_resample(X_train_s, y_train)
+    print(
+        f"Effectifs Train initial : {len(y_train)} dont {(y_train == 1).sum()} fraudes"
+    )
+    print(
+        f"Effectifs Train SMOTE   : {len(y_train_smote)} dont {(y_train_smote == 1).sum()} fraudes"
+    )
     return X_train_smote, y_train_smote
+
+def comparer_modeles(df_res_lr, df_res_dt, metrique="AP (Validation)", afficher=True):
+    """Fusionne les résultats LR et Arbre, classe les 6 modèles selon la métrique choisie
+    et affiche le tableau comparatif ainsi qu'un diagramme en barres AP / AUC-ROC.
+    Retourne le tableau trié et le nom du meilleur modèle.
+    """
+    df_all = pd.concat([df_res_lr, df_res_dt], ignore_index=True)
+    df_all["Famille"] = df_all["Modèle"].str.split(" ").str[0]
+    df_all["Variante"] = df_all["Modèle"].str.extract(r"\((.*)\)")
+
+    df_all = df_all.sort_values(metrique, ascending=False).reset_index(drop=True)
+    df_all["Rang"] = df_all.index + 1
+    meilleur = df_all.loc[0, "Modèle"]
+
+    if afficher:
+        print(f"Classement des modèles selon : {metrique}")
+        try:
+            from IPython.display import display
+            display(df_all[["Rang", "Modèle", "AP (Validation)", "AUC-ROC"]])
+        except Exception:
+            print(df_all[["Rang", "Modèle", "AP (Validation)", "AUC-ROC"]])
+
+        # Diagramme en barres : une barre par métrique, un groupe par modèle
+        ax = df_all.set_index("Modèle")[["AP (Validation)", "AUC-ROC"]].plot(
+            kind="barh", figsize=(9, 5)
+        )
+        ax.invert_yaxis()  # le meilleur en haut
+        ax.set_xlabel("Score")
+        ax.set_title("Comparaison des 6 modèles (Validation)")
+        ax.grid(axis="x", alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+
+        # Variante la plus efficace pour chaque famille de modèles
+        print("\nMeilleure variante par famille :")
+        for fam, g in df_all.groupby("Famille"):
+            best = g.loc[g[metrique].idxmax()]
+            print(f"  {fam} -> {best['Variante']} ({metrique} = {best[metrique]})")
+
+        print(f"\nMeilleur modèle global : {meilleur}")
+
+    return df_all, meilleur
+
 
 
 def evaluer_variantes_supervisees(
-    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, type_modele="lr"
+    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, type_modele="lr", afficher=True
 ):
     """Entraîne et compare les 3 variantes (Sans correction, Pondération, SMOTE)
     pour la Régression Logistique ou l'Arbre de Décision.
+    Affiche le tableau comparatif et les courbes ROC et PR.
     """
     if type_modele == "lr":
         modeles = {
@@ -426,14 +478,16 @@ def evaluer_variantes_supervisees(
             ),
             "LR (SMOTE)": LogisticRegression(max_iter=1000, random_state=42),
         }
+        titre = "Régression Logistique : Comparaison des 3 variantes"
     else:
         modeles = {
             "Arbre (Sans correction)": DecisionTreeClassifier(max_depth=5, random_state=42),
-            "Arbre (Pondéré)": DecisionTreeClassifier(
+            "Arbre (Pondération classes)": DecisionTreeClassifier(
                 max_depth=5, class_weight="balanced", random_state=42
             ),
             "Arbre (SMOTE)": DecisionTreeClassifier(max_depth=5, random_state=42),
         }
+        titre = "Arbre de Décision : Comparaison des 3 variantes"
 
     scores_dict = {}
     resultats = []
@@ -457,13 +511,25 @@ def evaluer_variantes_supervisees(
         })
 
     df_res = pd.DataFrame(resultats)
+
+    if afficher:
+        print(titre)
+        try:
+            from IPython.display import display
+            display(df_res)
+        except Exception:
+            print(df_res)
+        tracer_courbes_roc_pr(y_val, scores_dict)
+
     return df_res, scores_dict, modeles
 
 
 def evaluer_grille_lr(
-    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, min_precision=0.80
+    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, min_precision=0.80, afficher=True
 ):
-    """Évalue les 6 configurations de Régression Logistique (C=0.1, 1.0 sur les 3 variantes)."""
+    """Évalue les 6 configurations de Régression Logistique (C=0.1, 1.0 sur les 3 variantes).
+    Calcule le seuil optimal pour chaque variante et ordonne selon l'AP décroissant.
+    """
     configs_lr = [
         {"C": 0.1, "variante": "Sans correction"},
         {"C": 1.0, "variante": "Sans correction"},
@@ -489,19 +555,49 @@ def evaluer_grille_lr(
         nom_cfg = f"LR ({cfg['variante']}, C={cfg['C']})"
         scores_6_lr[nom_cfg] = scores_val
 
-        res = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
-        res["C"] = cfg["C"]
-        res["Variante"] = cfg["variante"]
+        res = {"C": cfg["C"], "Variante": cfg["variante"]}
+        metrics = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
+        res.update(metrics)
         resultats.append(res)
 
     df_res = pd.DataFrame(resultats)
+    cols_order = [
+        "C",
+        "Variante",
+        "AP",
+        "AUC-ROC",
+        "Contrainte (>=80%)",
+        "Seuil",
+        "Précision",
+        "Rappel",
+        "F1-score",
+        "Balanced Accuracy",
+        "FP (Fausses alertes)",
+        "FN (Fraudes manquées)",
+        "TP (Fraudes détectées)",
+        "TN (Normales correctes)",
+    ]
+    existing_cols = [c for c in cols_order if c in df_res.columns]
+    df_res = df_res[existing_cols]
+    df_res = df_res.sort_values(by="AP", ascending=False)
+
+    if afficher:
+        print("Régression Logistique : Évaluation des 6 configurations")
+        try:
+            from IPython.display import display
+            display(df_res)
+        except Exception:
+            print(df_res)
+
     return df_res, scores_6_lr
 
 
 def evaluer_grille_arbre(
-    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, min_precision=0.80
+    X_train_s, y_train, X_train_smote, y_train_smote, X_val_s, y_val, min_precision=0.80, afficher=True
 ):
-    """Évalue les 6 configurations d'Arbre de Décision (max_depth=3, 5 sur les 3 variantes)."""
+    """Évalue les 6 configurations d'Arbre de Décision (max_depth=3, 5 sur les 3 variantes).
+    Calcule le seuil optimal pour chaque variante et ordonne selon l'AP décroissant.
+    """
     configs_dt = [
         {"max_depth": 3, "variante": "Sans correction"},
         {"max_depth": 5, "variante": "Sans correction"},
@@ -527,27 +623,55 @@ def evaluer_grille_arbre(
         nom_cfg = f"Arbre (prof={cfg['max_depth']}, {cfg['variante']})"
         scores_6_dt[nom_cfg] = scores_val
 
-        res = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
-        res["Profondeur"] = cfg["max_depth"]
-        res["Variante"] = cfg["variante"]
+        res = {"Profondeur": cfg["max_depth"], "Variante": cfg["variante"]}
+        metrics = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
+        res.update(metrics)
         resultats.append(res)
 
     df_res = pd.DataFrame(resultats)
+    cols_order = [
+        "Profondeur",
+        "Variante",
+        "AP",
+        "AUC-ROC",
+        "Contrainte (>=80%)",
+        "Seuil",
+        "Précision",
+        "Rappel",
+        "F1-score",
+        "Balanced Accuracy",
+        "FP (Fausses alertes)",
+        "FN (Fraudes manquées)",
+        "TP (Fraudes détectées)",
+        "TN (Normales correctes)",
+    ]
+    existing_cols = [c for c in cols_order if c in df_res.columns]
+    df_res = df_res[existing_cols]
+    df_res = df_res.sort_values(by="AP", ascending=False)
+
+    if afficher:
+        print("Arbre de Décision : Évaluation des 6 configurations")
+        try:
+            from IPython.display import display
+            display(df_res)
+        except Exception:
+            print(df_res)
+
     return df_res, scores_6_dt
 
 
 def entrainer_modeles_non_supervises(
-    X_train_s, X_val_s, y_val, n_sub_lof=30000, random_state=42, min_precision=0.80
+    X_train_s, X_val_s, y_val, n_sub_lof=30000, random_state=42, min_precision=0.80, afficher=True
 ):
-    """Ajuste Isolation Forest et LOF (sur sous-échantillon 30 000), harmonise les scores
-    (-score_samples) et calibre les seuils optimaux.
+    """Ajuste Isolation Forest et LOF (sur sous-échantillon fixe de 30 000 transactions),
+    harmonise les scores (-score_samples) et calibre les seuils optimaux selon la contrainte opérationnelle.
     """
     detecteurs = {
         "Isolation Forest": IsolationForest(
-            n_estimators=100, random_state=random_state, n_jobs=-1
+            n_estimators=100, contamination="auto", random_state=random_state, n_jobs=-1
         ),
         "Local Outlier Factor (LOF)": LocalOutlierFactor(
-            n_neighbors=20, novelty=True
+            n_neighbors=20, novelty=True, n_jobs=-1
         ),
     }
 
@@ -555,6 +679,7 @@ def entrainer_modeles_non_supervises(
     scores_non_sup_dict = {}
     resultats = []
 
+    print(f"Effectif utilisé pour l'entraînement de LOF : {len(X_train_sub)} transactions.")
     print("--- Entraînement des détecteurs non supervisés ---")
     for nom, clf in detecteurs.items():
         print(f"Entraînement de {nom}...")
@@ -572,6 +697,32 @@ def entrainer_modeles_non_supervises(
         resultats.append(res)
 
     df_res = pd.DataFrame(resultats)
+    cols_order = [
+        "Modèle",
+        "AP",
+        "AUC-ROC",
+        "Contrainte (>=80%)",
+        "Seuil",
+        "Précision",
+        "Rappel",
+        "F1-score",
+        "Balanced Accuracy",
+        "FP (Fausses alertes)",
+        "FN (Fraudes manquées)",
+        "TP (Fraudes détectées)",
+        "TN (Normales correctes)",
+    ]
+    existing_cols = [c for c in cols_order if c in df_res.columns]
+    df_res = df_res[existing_cols]
+
+    if afficher:
+        print("\nDétecteurs non supervisés : Résultats sur la Validation")
+        try:
+            from IPython.display import display
+            display(df_res)
+        except Exception:
+            print(df_res)
+
     return df_res, scores_non_sup_dict, detecteurs
 
 
