@@ -761,46 +761,62 @@ def recapitulatif_section_2b(df_eval_lr, df_eval_dt, afficher=True):
 
 
 
-
 def entrainer_modeles_non_supervises(
-    X_train_s, X_val_s, y_val, n_sub_lof=30000, random_state=42, min_precision=0.80, afficher=True
+    X_train_s, X_val_s, y_val, X_train_lof=None, random_state=42, min_precision=0.80, afficher=True
 ):
-    """Ajuste Isolation Forest et LOF (sur sous-échantillon fixe de 30 000 transactions),
-    harmonise les scores (-score_samples) et calibre les seuils optimaux selon la contrainte opérationnelle.
+    """Ajuste IF et LOF sans étiquettes (LOF sur X_train_lof si fourni, sinon sur tout le Train).
+    Les hyperparamètres sont choisis par AP sur la Validation, puis le seuil est calibré sur la Validation.
     """
-    detecteurs = {
-        "Isolation Forest": IsolationForest(
-            n_estimators=100, contamination="auto", random_state=random_state, n_jobs=-1
-        ),
-        "Local Outlier Factor (LOF)": LocalOutlierFactor(
-            n_neighbors=20, novelty=True, n_jobs=-1
-        ),
+    X_fit = np.asarray(X_train_s)
+    X_fit_lof = np.asarray(X_train_lof) if X_train_lof is not None else X_fit
+    X_eval = np.asarray(X_val_s)
+
+    grilles = {
+        "Isolation Forest": [
+            {"n_estimators": n, "max_samples": m} for n in (100, 200) for m in (256, 1024, 2048)
+        ],
+        "Local Outlier Factor (LOF)": [{"n_neighbors": k} for k in (10, 20, 50, 100, 200, 500)],
     }
 
-    X_train_sub = X_train_s.sample(n=n_sub_lof, random_state=random_state)
+    def construire(nom, params):
+        if nom == "Isolation Forest":
+            return IsolationForest(contamination="auto", random_state=random_state, n_jobs=-1, **params)
+        return LocalOutlierFactor(novelty=True, n_jobs=-1, **params)
+
     scores_non_sup_dict = {}
+    detecteurs = {}
     resultats = []
+    grille_resultats = []
 
-    print(f"Effectif utilisé pour l'entraînement de LOF : {len(X_train_sub)} transactions.")
-    print("--- Entraînement des détecteurs non supervisés ---")
-    for nom, clf in detecteurs.items():
-        print(f"Entraînement de {nom}...")
-        if "LOF" in nom:
-            clf.fit(X_train_sub)
-        else:
-            clf.fit(X_train_s)
+    print("--- Entraînement des détecteurs non supervisés (sans étiquettes) ---")
+    for nom, grille in grilles.items():
+        X_ajust = X_fit_lof if nom.startswith("Local") else X_fit
+        print(f"Entraînement de {nom} ({len(grille)} configurations, {len(X_ajust)} transactions)...")
+        meilleur = None
+        for params in grille:
+            clf = construire(nom, params).fit(X_ajust)
 
-        # Inversion du signe pour harmoniser : score élevé = anomalie
-        scores_val = -clf.score_samples(X_val_s)
-        scores_non_sup_dict[nom] = scores_val
+            # Inversion du signe pour harmoniser : score élevé = anomalie
+            scores_val = -clf.score_samples(X_eval)
+            ap = average_precision_score(y_val, scores_val)
+            grille_resultats.append({"Modèle": nom, **params, "AP (Validation)": round(ap, 4)})
 
-        res = trouver_meilleur_seuil(y_val, scores_val, min_precision=min_precision)
+            if meilleur is None or ap > meilleur["ap"]:
+                meilleur = {"ap": ap, "params": params, "clf": clf, "scores": scores_val}
+
+        scores_non_sup_dict[nom] = meilleur["scores"]
+        detecteurs[nom] = meilleur["clf"]
+
+        res = trouver_meilleur_seuil(y_val, meilleur["scores"], min_precision=min_precision)
         res["Modèle"] = nom
+        res["Hyperparamètres"] = ", ".join(f"{k}={v}" for k, v in meilleur["params"].items())
         resultats.append(res)
 
     df_res = pd.DataFrame(resultats)
+    df_grille = pd.DataFrame(grille_resultats)
     cols_order = [
         "Modèle",
+        "Hyperparamètres",
         "AP",
         "AUC-ROC",
         "Contrainte (>=80%)",
@@ -818,39 +834,31 @@ def entrainer_modeles_non_supervises(
     df_res = df_res[existing_cols]
 
     if afficher:
-        print("\nDétecteurs non supervisés : Résultats sur la Validation")
+        print("Grille des configurations (AP sur la Validation, sélection des hyperparamètres)")
+        try:
+            from IPython.display import display
+            display(df_grille)
+        except Exception:
+            print(df_grille)
+
+        print("\nDétecteurs non supervisés : Résultats sur la Validation (meilleure configuration par modèle)")
         try:
             from IPython.display import display
             display(df_res)
         except Exception:
             print(df_res)
 
-        if len(df_res) > 0:
-            df_valid = df_res[df_res["Précision"] >= 0.80]
-            if len(df_valid) > 0:
-                meilleur_idx = df_valid["AP"].idxmax()
-                meilleur_row = df_res.loc[meilleur_idx]
-                statut = "Respecte contrainte (Précision >= 80%)"
-            else:
-                meilleur_idx = df_res["AP"].idxmax()
-                meilleur_row = df_res.loc[meilleur_idx]
-                statut = "Contrainte NON respectée (Précision < 80%)"
-
-
-            print(f"MEILLEUR MODÈLE NON SUPERVISÉ : {meilleur_row['Modèle']}")
-
-            print(f"   {statut}")
-            print(f"   AP           : {meilleur_row['AP']:.4f}")
-            print(f"   AUC-ROC      : {meilleur_row['AUC-ROC']:.4f}")
-            print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
-            print(f"   Précision    : {meilleur_row['Précision']:.4f} (contrainte >= 0.80)")
-            print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
-            print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
-
-            print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
-            print(f"   Précision    : {meilleur_row['Précision']:.4f}")
-            print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
-            print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
+        meilleur_row, statut = selectionner_meilleure_config(df_res)
+        alertes = int(meilleur_row["TP (Fraudes détectées)"] + meilleur_row["FP (Fausses alertes)"])
+        print(f"MEILLEUR MODÈLE NON SUPERVISÉ : {meilleur_row['Modèle']}")
+        print(f"   {statut}")
+        print(f"   Alertes      : {alertes}")
+        print(f"   AP           : {meilleur_row['AP']:.4f}")
+        print(f"   AUC-ROC      : {meilleur_row['AUC-ROC']:.4f}")
+        print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
+        print(f"   Précision    : {meilleur_row['Précision']:.4f}")
+        print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
+        print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
 
     return df_res, scores_non_sup_dict, detecteurs
 
