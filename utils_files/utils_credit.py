@@ -348,6 +348,22 @@ def trouver_meilleur_seuil(y_true, scores, min_precision=0.80):
     return metriques
 
 
+def selectionner_meilleure_config(df_res):
+    """Sélection : rappel max, puis précision max, puis AP max, parmi les configs
+    respectant la contrainte (Précision >= 80%, au moins 1 alerte).
+    Si aucune config ne respecte la contrainte, retourne le meilleur compromis
+    avec le statut 'Objectif non atteint'.
+    """
+    df_ok = df_res[df_res["Contrainte (>=80%)"] == "Atteint"]
+    if len(df_ok) > 0:
+        statut = "Respecte contrainte (Précision >= 80%)"
+    else:
+        df_ok = df_res
+        statut = "Objectif non atteint (aucune config avec Précision >= 80%)"
+    meilleur = df_ok.sort_values(by=["Rappel", "Précision", "AP"], ascending=False).iloc[0]
+    return meilleur, statut
+
+
 def tracer_f1_balanced_acc(y_true, scores, seuil_retenu=None):
     """Trace l'évolution du F1-score et de la Balanced Accuracy en fonction du seuil."""
     seuils = np.linspace(0.01, 0.99, 150)
@@ -531,11 +547,11 @@ def evaluer_grille_lr(
     Calcule le seuil optimal pour chaque variante et ordonne selon l'AP décroissant.
     """
     configs_lr = [
-        {"C": 0.1, "variante": "Sans correction"},
+        {"C": 0.01, "variante": "Sans correction"},
         {"C": 1.0, "variante": "Sans correction"},
-        {"C": 0.1, "variante": "Pondération"},
+        {"C": 0.01, "variante": "Pondération"},
         {"C": 1.0, "variante": "Pondération"},
-        {"C": 0.1, "variante": "SMOTE"},
+        {"C": 0.01, "variante": "SMOTE"},
         {"C": 1.0, "variante": "SMOTE"},
     ]
     scores_6_lr = {}
@@ -589,6 +605,19 @@ def evaluer_grille_lr(
         except Exception:
             print(df_res)
 
+        meilleur_row, statut = selectionner_meilleure_config(df_res)
+        alertes = int(meilleur_row["TP (Fraudes détectées)"] + meilleur_row["FP (Fausses alertes)"])
+
+        print(f"MEILLEUR MODÈLE LR : C={meilleur_row['C']}, {meilleur_row['Variante']}")
+        print(f"   {statut}")
+        print(f"   Alertes      : {alertes}")
+        print(f"   AP           : {meilleur_row['AP']:.4f}")
+        print(f"   AUC-ROC      : {meilleur_row['AUC-ROC']:.4f}")
+        print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
+        print(f"   Précision    : {meilleur_row['Précision']:.4f} (contrainte >= 0.80)")
+        print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
+        print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
+
     return df_res, scores_6_lr
 
 
@@ -599,12 +628,12 @@ def evaluer_grille_arbre(
     Calcule le seuil optimal pour chaque variante et ordonne selon l'AP décroissant.
     """
     configs_dt = [
-        {"max_depth": 3, "variante": "Sans correction"},
         {"max_depth": 5, "variante": "Sans correction"},
-        {"max_depth": 3, "variante": "Pondération"},
+        {"max_depth": 10, "variante": "Sans correction"},
         {"max_depth": 5, "variante": "Pondération"},
-        {"max_depth": 3, "variante": "SMOTE"},
+        {"max_depth": 10, "variante": "Pondération"},
         {"max_depth": 5, "variante": "SMOTE"},
+        {"max_depth": 10, "variante": "SMOTE"},
     ]
     scores_6_dt = {}
     resultats = []
@@ -657,7 +686,80 @@ def evaluer_grille_arbre(
         except Exception:
             print(df_res)
 
+        meilleur_row, statut = selectionner_meilleure_config(df_res)
+        alertes = int(meilleur_row["TP (Fraudes détectées)"] + meilleur_row["FP (Fausses alertes)"])
+
+        print(f"MEILLEUR MODÈLE ARBRE : Profondeur={meilleur_row['Profondeur']}, {meilleur_row['Variante']}")
+        print(f"   {statut}")
+        print(f"   Alertes      : {alertes}")
+        print(f"   AP           : {meilleur_row['AP']:.4f}")
+        print(f"   AUC-ROC      : {meilleur_row['AUC-ROC']:.4f}")
+        print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
+        print(f"   Précision    : {meilleur_row['Précision']:.4f} (contrainte >= 0.80)")
+        print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
+        print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
+    
     return df_res, scores_6_dt
+
+
+def recapitulatif_section_2b(df_eval_lr, df_eval_dt, afficher=True):
+    """
+    Récapitule la section 2.b : sélectionne les meilleurs modèles LR et Arbre,
+    puis compare pour choisir le modèle supervisé final.
+    """
+    
+    meilleur_lr, _ = selectionner_meilleure_config(df_eval_lr)
+    meilleur_dt, _ = selectionner_meilleure_config(df_eval_dt)
+    lr_gagne = (meilleur_lr["Rappel"], meilleur_lr["Précision"], meilleur_lr["AP"]) > (
+        meilleur_dt["Rappel"], meilleur_dt["Précision"], meilleur_dt["AP"]
+    )
+    
+    if afficher:
+        print("RÉCAPITULATIF SECTION 2.b - COMPARAISON DES 12 CONFIGURATIONS")
+        
+        # Tableau comparatif final
+        print("\nTABLEAU COMPARATIF FINAL (Meilleur de chaque famille)")
+        df_final = pd.DataFrame([
+            {
+                "Modèle": "Régression Logistique",
+                "Config": f"C={meilleur_lr['C']}, {meilleur_lr['Variante']}",
+                "AP": meilleur_lr["AP"],
+                "AUC-ROC": meilleur_lr["AUC-ROC"],
+                "Seuil": meilleur_lr["Seuil"],
+                "Précision": meilleur_lr["Précision"],
+                "Rappel": meilleur_lr["Rappel"],
+                "F1-score": meilleur_lr["F1-score"],
+            },
+            {
+                "Modèle": "Arbre de Décision",
+                "Config": f"depth={meilleur_dt['Profondeur']}, {meilleur_dt['Variante']}",
+                "AP": meilleur_dt["AP"],
+                "AUC-ROC": meilleur_dt["AUC-ROC"],
+                "Seuil": meilleur_dt["Seuil"],
+                "Précision": meilleur_dt["Précision"],
+                "Rappel": meilleur_dt["Rappel"],
+                "F1-score": meilleur_dt["F1-score"],
+            }
+        ])
+        try:
+            from IPython.display import display
+            display(df_final)
+        except:
+            print(df_final)
+        
+        # Décision finale
+        if lr_gagne:
+            gagnant = "LR"
+            print(f"GAGNANT FINAL : Régression Logistique (Rappel={meilleur_lr['Rappel']:.4f}, Précision={meilleur_lr['Précision']:.4f}, AP={meilleur_lr['AP']:.4f})")
+        else:
+            gagnant = "DT"
+            print(f"GAGNANT FINAL : Arbre de Décision (Rappel={meilleur_dt['Rappel']:.4f}, Précision={meilleur_dt['Précision']:.4f}, AP={meilleur_dt['AP']:.4f})")
+
+        return meilleur_lr if gagnant == "LR" else meilleur_dt, gagnant
+
+    return meilleur_lr if lr_gagne else meilleur_dt, "LR" if lr_gagne else "DT"
+
+
 
 
 def entrainer_modeles_non_supervises(
@@ -722,6 +824,33 @@ def entrainer_modeles_non_supervises(
             display(df_res)
         except Exception:
             print(df_res)
+
+        if len(df_res) > 0:
+            df_valid = df_res[df_res["Précision"] >= 0.80]
+            if len(df_valid) > 0:
+                meilleur_idx = df_valid["AP"].idxmax()
+                meilleur_row = df_res.loc[meilleur_idx]
+                statut = "Respecte contrainte (Précision >= 80%)"
+            else:
+                meilleur_idx = df_res["AP"].idxmax()
+                meilleur_row = df_res.loc[meilleur_idx]
+                statut = "Contrainte NON respectée (Précision < 80%)"
+
+
+            print(f"MEILLEUR MODÈLE NON SUPERVISÉ : {meilleur_row['Modèle']}")
+
+            print(f"   {statut}")
+            print(f"   AP           : {meilleur_row['AP']:.4f}")
+            print(f"   AUC-ROC      : {meilleur_row['AUC-ROC']:.4f}")
+            print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
+            print(f"   Précision    : {meilleur_row['Précision']:.4f} (contrainte >= 0.80)")
+            print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
+            print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
+
+            print(f"   Seuil optimal: {meilleur_row['Seuil']:.4f}")
+            print(f"   Précision    : {meilleur_row['Précision']:.4f}")
+            print(f"   Rappel       : {meilleur_row['Rappel']:.4f}")
+            print(f"   F1-score     : {meilleur_row['F1-score']:.4f}")
 
     return df_res, scores_non_sup_dict, detecteurs
 
