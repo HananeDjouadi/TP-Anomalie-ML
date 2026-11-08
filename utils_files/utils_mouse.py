@@ -38,9 +38,17 @@ def plot_mouse(X, y, title="Mouse — nuage de points"):
     plt.show()
 
 
-def fit_isolation_forest(X, random_state=42, **kwargs):
-    """Ajuste Isolation Forest (sans utiliser y)."""
-    model = IsolationForest(random_state=random_state, **kwargs)
+def fit_isolation_forest(X, random_state=42, contamination=0.02, **kwargs):
+    """
+    Ajuste Isolation Forest (sans utiliser y pour le fit).
+
+    contamination=0.02 ≈ 10/500 sur Mouse : on indique la *proportion*
+    d'anomalies attendue pour le seuil de predict (pas quels points).
+    Surbrider via contamination=... si besoin (ex. \"auto\").
+    """
+    model = IsolationForest(
+        random_state=random_state, contamination=contamination, **kwargs
+    )
     model.fit(X)
     # score_samples : plus bas = plus anormal dans sklearn
     # on inverse pour : plus haut = plus suspect (protocole du TP)
@@ -48,6 +56,7 @@ def fit_isolation_forest(X, random_state=42, **kwargs):
     preds = model.predict(X)  # 1 = normal, -1 = anomalie
     y_pred = (preds == -1).astype(int)
     return model, scores, y_pred
+
 
 
 def fit_lof_outliers(X, n_neighbors=20, **kwargs):
@@ -60,17 +69,75 @@ def fit_lof_outliers(X, n_neighbors=20, **kwargs):
     return model, scores, y_pred
 
 
-def plot_detection(X, y_pred, scores, title):
-    """Points détectés + couleur = score + histogramme."""
+def plot_detection(X, y_pred, scores, title, y_true=None):
+    """
+    Points détectés + couleur = score + histogramme.
+
+    Si y_true est fourni (évaluation seulement), on distingue :
+    - TP : alerte correcte (cercle vert)
+    - FP : fausse alerte (croix rouge)
+    - FN : anomalie manquée (cercle orange vide)
+    """
+    y_pred = np.asarray(y_pred).ravel()
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # gauche : détection (prédictions)
-    axes[0].scatter(X.loc[y_pred == 0, "x1"], X.loc[y_pred == 0, "x2"],
-                    s=20, alpha=0.6, label="Prédit normal")
-    axes[0].scatter(X.loc[y_pred == 1, "x1"], X.loc[y_pred == 1, "x2"],
-                    s=40, c="red", marker="x", label="Prédit anomalie")
+    # gauche : détection
+    if y_true is None:
+        axes[0].scatter(
+            X.loc[y_pred == 0, "x1"],
+            X.loc[y_pred == 0, "x2"],
+            s=20,
+            alpha=0.6,
+            label="Prédit normal",
+        )
+        axes[0].scatter(
+            X.loc[y_pred == 1, "x1"],
+            X.loc[y_pred == 1, "x2"],
+            s=40,
+            c="red",
+            marker="x",
+            label="Prédit anomalie",
+        )
+    else:
+        y_true = np.asarray(y_true).ravel()
+        tn = (y_pred == 0) & (y_true == 0)
+        tp = (y_pred == 1) & (y_true == 1)
+        fp = (y_pred == 1) & (y_true == 0)
+        fn = (y_pred == 0) & (y_true == 1)
+
+        axes[0].scatter(
+            X.iloc[tn]["x1"], X.iloc[tn]["x2"], s=18, alpha=0.45, c="0.7", label="Normal OK"
+        )
+        axes[0].scatter(
+            X.iloc[tp]["x1"],
+            X.iloc[tp]["x2"],
+            s=90,
+            facecolors="none",
+            edgecolors="green",
+            linewidths=2,
+            label="TP (vraie anomalie détectée)",
+        )
+        axes[0].scatter(
+            X.iloc[fp]["x1"],
+            X.iloc[fp]["x2"],
+            s=70,
+            c="red",
+            marker="x",
+            linewidths=2,
+            label="FP (fausse alerte)",
+        )
+        axes[0].scatter(
+            X.iloc[fn]["x1"],
+            X.iloc[fn]["x2"],
+            s=90,
+            facecolors="none",
+            edgecolors="orange",
+            linewidths=2,
+            label="FN (anomalie manquée)",
+        )
+
     axes[0].set_title(f"{title} — points détectés")
-    axes[0].legend()
+    axes[0].legend(loc="best", fontsize=8)
     axes[0].axis("equal")
 
     # droite : couleur = score
@@ -169,21 +236,21 @@ def compare_thresholds(X, y_true, scores, y_pred_default, method_name="Methode")
     # 1) défaut
     print(f"\n######## {method_name} — seuil PAR DÉFAUT ########")
     evaluate_binary(y_true, y_pred_default, name=f"{method_name} | défaut")
-    plot_detection(X, y_pred_default, scores, f"{method_name} — défaut")
+    plot_detection(X, y_pred_default, scores, f"{method_name} — défaut", y_true=y_true)
 
     # 2) IQR (k=1.5 fixé a priori, sans tuner avec y)
     thr_iqr, y_pred_iqr = threshold_iqr(scores, k=1.5)
     print(f"\n######## {method_name} — seuil IQR ########")
     print("Seuil IQR =", round(thr_iqr, 6))
     evaluate_binary(y_true, y_pred_iqr, name=f"{method_name} | IQR")
-    plot_detection(X, y_pred_iqr, scores, f"{method_name} — IQR")
+    plot_detection(X, y_pred_iqr, scores, f"{method_name} — IQR", y_true=y_true)
 
     # 3) Clustering KMeans (k=2) sur les scores — sans utiliser y
     thr_cl, y_pred_cl = threshold_clustering(scores)
     print(f"\n######## {method_name} — seuil CLUSTERING (KMeans k=2) ########")
     print("Frontière (moyenne des centres) =", round(thr_cl, 6))
     evaluate_binary(y_true, y_pred_cl, name=f"{method_name} | clustering")
-    plot_detection(X, y_pred_cl, scores, f"{method_name} — clustering")
+    plot_detection(X, y_pred_cl, scores, f"{method_name} — clustering", y_true=y_true)
 
     return {
         "iqr": (thr_iqr, y_pred_iqr),
@@ -297,24 +364,78 @@ def fit_lof_novelty(X_train, X_test, n_neighbors=20, **kwargs):
 
 
 def plot_novelty(X_train, X_test, y_test, y_pred, title="LOF nouveautés"):
-    """Apprentissage (normaux) vs test (prédictions)."""
+    """Apprentissage (normaux) vs test, avec TP/FP/FN sur le panneau droit."""
+    y_test = np.asarray(y_test).ravel()
+    y_pred = np.asarray(y_pred).ravel()
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
+    # gauche : vérité (train + test)
     axes[0].scatter(X_train["x1"], X_train["x2"], s=20, alpha=0.7, label="Train (normaux)")
-    axes[0].scatter(X_test.loc[y_test == 0, "x1"], X_test.loc[y_test == 0, "x2"],
-                    s=25, marker="o", facecolors="none", edgecolors="green", label="Test normal")
-    axes[0].scatter(X_test.loc[y_test == 1, "x1"], X_test.loc[y_test == 1, "x2"],
-                    s=40, c="red", marker="x", label="Test anomalie (vrai)")
+    axes[0].scatter(
+        X_test.iloc[y_test == 0]["x1"],
+        X_test.iloc[y_test == 0]["x2"],
+        s=25,
+        marker="o",
+        facecolors="none",
+        edgecolors="green",
+        label="Test normal",
+    )
+    axes[0].scatter(
+        X_test.iloc[y_test == 1]["x1"],
+        X_test.iloc[y_test == 1]["x2"],
+        s=40,
+        c="red",
+        marker="x",
+        label="Test anomalie (vrai)",
+    )
     axes[0].set_title(f"{title} — train vs test (vraies étiquettes)")
-    axes[0].legend()
+    axes[0].legend(loc="best", fontsize=8)
     axes[0].axis("equal")
 
-    axes[1].scatter(X_test.loc[y_pred == 0, "x1"], X_test.loc[y_pred == 0, "x2"],
-                    s=25, alpha=0.7, label="Prédit normal")
-    axes[1].scatter(X_test.loc[y_pred == 1, "x1"], X_test.loc[y_pred == 1, "x2"],
-                    s=40, c="red", marker="x", label="Prédit nouveauté")
-    axes[1].set_title(f"{title} — prédictions sur le test")
-    axes[1].legend()
+    # droite : erreurs mises en évidence (TP / FP / FN)
+    tn = (y_pred == 0) & (y_test == 0)
+    tp = (y_pred == 1) & (y_test == 1)
+    fp = (y_pred == 1) & (y_test == 0)
+    fn = (y_pred == 0) & (y_test == 1)
+
+    axes[1].scatter(
+        X_test.iloc[tn]["x1"],
+        X_test.iloc[tn]["x2"],
+        s=18,
+        alpha=0.45,
+        c="0.7",
+        label="Normal OK",
+    )
+    axes[1].scatter(
+        X_test.iloc[tp]["x1"],
+        X_test.iloc[tp]["x2"],
+        s=90,
+        facecolors="none",
+        edgecolors="green",
+        linewidths=2,
+        label="TP (vraie anomalie détectée)",
+    )
+    axes[1].scatter(
+        X_test.iloc[fp]["x1"],
+        X_test.iloc[fp]["x2"],
+        s=70,
+        c="red",
+        marker="x",
+        linewidths=2,
+        label="FP (fausse alerte)",
+    )
+    axes[1].scatter(
+        X_test.iloc[fn]["x1"],
+        X_test.iloc[fn]["x2"],
+        s=90,
+        facecolors="none",
+        edgecolors="orange",
+        linewidths=2,
+        label="FN (anomalie manquée)",
+    )
+    axes[1].set_title(f"{title} — prédictions test (erreurs)")
+    axes[1].legend(loc="best", fontsize=8)
     axes[1].axis("equal")
 
     plt.tight_layout()
