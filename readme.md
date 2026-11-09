@@ -12,25 +12,28 @@ Projet académique de Machine Learning — Détection d'anomalies, détection de
 TP-Anomalie-ML/
 │
 ├── data/                                      # Jeux de données
-│   ├── creditcard.csv                         # Fraudes bancaires (284 807 transactions initiales, 31 colonnes)
+│   ├── creditcard.csv                         # Fraudes bancaires (Parties 2, 3, 5.2)
 │   ├── mouse.txt                              # Données synthétiques 2D (Parties 1 et 5.1)
-│   └── ai4i2020.csv                           # Maintenance prédictive industrielle (Partie 4)
+│   └── ai4i2020.csv                           # Maintenance prédictive (Partie 4)
 │
-├── notebook/                                  # Notebooks Jupyter et scripts modulaires
-│   ├── mouse.ipynb                            # Notebook : Données synthétiques 2D et Robustesse (Parties 1 & 5.1)
-│   ├── partie2et3_fraudes.ipynb               # Notebook complet : Fraudes, EasyEnsemble & SHAP (Parties 2, 3 & 5.2)
-│   ├── utils_partie3.py                       # Fonctions modulaires pour la Partie 3 (EasyEnsemble & comparaison)
-│   ├── utils_partie5.py                       # Fonctions modulaires pour la Partie 5 (Robustesse & SHAP)
-│   ├── utils_credit.py                        # Fonctions modulaires étanches (prétraitements, seuils, courbes)
-│   ├── utils_mouse.py                         # Utilitaires pour les données Mouse
-│   └── utils.py                               # Utilitaires généraux
+├── notebook/                                  # Notebooks Jupyter
+│   ├── mouse.ipynb                            # Parties 1 et 5.1 (Mouse)
+│   ├── partie2et3_fraudes.ipynb               # Parties 2, 3 et 5.2 (Credit Card + SHAP)
+│   └── partie4.ipynb                          # Partie 4 (AI4I)
 │
-├── les syntheses/                             # Rapports académiques de synthèse
-│   ├── Rapport_Partie2_et_3_Detection_Fraudes.md      # Rapport exhaustif des Parties 2 & 3
-│   └── Rapport_Partie5_Robustesse_et_Explicabilite.md # Rapport dédié de la Partie 5 (Robustesse & SHAP)
+├── utils_files/                               # Fonctions factorisées
+│   ├── utils_mouse.py                         # Partie 1 (+ helpers Mouse)
+│   ├── utils_credit.py                        # Parties 2 / 3 (seuils réutilisés en 4)
+│   ├── utils_partie3.py                       # Partie 3 (EasyEnsemble)
+│   ├── utils_ai4i.py                          # Partie 4
+│   ├── utils_partie5.py                       # Parties 5.1 et 5.2
+│   └── __init__.py
 │
-├── requirements.txt                           # Dépendances Python du projet
-└── README.md                                  # Présentation générale du projet et résultats
+├── les syntheses/                             # Rapports de synthèse
+│   └── rapport_general.md                     # Rapport général (toutes les parties)
+│
+├── requirements.txt
+└── README.md
 ```
 
 ---
